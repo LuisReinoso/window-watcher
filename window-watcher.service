@@ -1,0 +1,15 @@
+[Unit]
+Description=Window workspace watcher — moves new windows to the workspace where they were launched
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/window-watcher.sh
+Restart=on-failure
+RestartSec=3
+SuccessExitStatus=143
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+
+[Install]
+WantedBy=graphical-session.target
