@@ -8,17 +8,17 @@ Reactive X11 window watcher that moves new windows to the workspace where they w
 
 ## How it works
 
-A background tracker monitors window focus changes and records which workspace the user is on. When a new window appears from a watched application, `window-watcher` moves it to the workspace the user was on before the new window appeared. It also handles existing windows that get activated from another workspace (e.g., opening a file that activates a browser on a different workspace).
+A background tracker monitors window focus changes and records which workspace you are on. When a new window appears from a watched application, `window-watcher` moves it to the workspace you were on before the new window appeared. It also handles existing windows that get activated from another workspace (e.g., when opening a file activates an application that lives on a different workspace).
 
-This handles apps that reuse a single process or are spawned by other processes — regardless of how the window was created, it lands on the right workspace.
+This handles applications that reuse a single process or are spawned by other processes — regardless of how the window was created, it lands on the right workspace.
 
-A companion tool `ww-open` is included as a workspace-aware replacement for `xdg-open`. It opens files/URLs in a browser window on your current workspace — if no browser exists there, it launches a new window instead of adding a tab to a browser on another workspace.
+A companion tool `ww-open` is included as a workspace-aware replacement for `xdg-open`. It opens files or URLs on your current workspace — if no matching window exists there, it launches a new one instead of routing to a window on another workspace.
 
 The `DISPLAY` variable is auto-detected at runtime, so the service works regardless of which display number your X11 session uses (`:0`, `:1`, etc.).
 
 ## Requirements
 
-- X11 session (works with XWayland on Ubuntu 22.04/24.04)
+- X11 session (works with XWayland)
 - `wmctrl`
 - `xprop` (from `x11-utils`)
 - `systemd` (user service)
@@ -50,14 +50,14 @@ This will:
 
 ## ww-open
 
-Workspace-aware replacement for `xdg-open`. Use it to open files or URLs in a browser on your current workspace:
+Workspace-aware replacement for `xdg-open`. Use it to open files or URLs on your current workspace:
 
 ```bash
 ww-open dashboard.html
 ww-open https://example.com
 ```
 
-If a browser window already exists on your workspace, it opens a new tab there. If not, it launches a new browser window on the current workspace.
+If a matching window already exists on your current workspace, it reuses it. If not, it launches a new one.
 
 ## Uninstallation
 
@@ -67,10 +67,10 @@ bash uninstall.sh
 
 ## Configuration
 
-Edit `WATCH_CLASSES` in `~/.local/bin/window-watcher.sh` to add or remove watched applications:
+Edit `WATCH_CLASSES` in `~/.local/bin/window-watcher.sh` to declare which windows should be managed. Add `WM_CLASS` substrings to the array:
 
 ```bash
-WATCH_CLASSES=("chromium" "chrome" "google-chrome" "firefox" "slack")
+WATCH_CLASSES=("your-app-class" "another-class")
 ```
 
 To find the `WM_CLASS` of any window:
@@ -105,6 +105,33 @@ systemctl --user restart window-watcher
 # Check status
 systemctl --user status window-watcher
 ```
+
+## Testing
+
+The project uses a Bash testing framework vendored as a git submodule.
+
+After cloning:
+
+```bash
+git submodule update --init --recursive
+```
+
+Run all tests:
+
+```bash
+./test/run.sh
+```
+
+Run only unit or integration tests:
+
+```bash
+./test/bats-core/bin/bats test/unit/
+./test/bats-core/bin/bats test/integration/
+```
+
+Tests cover:
+- **Unit**: pure helper functions (`normalize_wid`, `is_watched`, `is_valid_ws`, `get_window_class`)
+- **Integration**: `ww-open` branches with mocked external commands
 
 ## License
 

@@ -6,27 +6,13 @@ set -o pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-# Applications whose windows should be moved to the launch workspace
-WATCH_CLASSES=("chromium" "chrome" "google-chrome" "firefox" "slack")
+# Applications whose windows should be moved to the launch workspace.
+# Add WM_CLASS substrings to match. Find them with: xprop | grep WM_CLASS
+# Example: WATCH_CLASSES=("your-app-class" "another-class")
+WATCH_CLASSES=()
 
 # Set DEBUG=1 to enable verbose logging
 DEBUG="${DEBUG:-0}"
-
-# --- Environment detection ----------------------------------------------------
-
-if [[ -z "$DISPLAY" ]]; then
-    DISPLAY=$(w -h "$USER" 2>/dev/null | awk '/:[0-9]/ {print $3; exit}')
-    export DISPLAY
-fi
-
-if [[ -z "$DISPLAY" ]]; then
-    echo "[window-watcher] error: could not detect DISPLAY — is an X11 session running?"
-    exit 1
-fi
-
-STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/window-watcher"
-STATE_FILE="$STATE_DIR/focus-state"
-mkdir -p "$STATE_DIR"
 
 # --- Helpers ------------------------------------------------------------------
 
@@ -39,7 +25,8 @@ normalize_wid() {
 
 get_window_class() {
     xprop -id "$1" WM_CLASS 2>/dev/null \
-        | grep -oi '"[^"]*"' | tr -d '"' | tr '[:upper:]' '[:lower:]' | tr '\n' ' '
+        | grep -oi '"[^"]*"' | tr -d '"' | tr '[:upper:]' '[:lower:]' | tr '\n' ' ' \
+        || true
 }
 
 is_watched() {
@@ -51,9 +38,10 @@ is_watched() {
 }
 
 # --- Focus tracker ------------------------------------------------------------
-# Runs in the background. Tracks which workspace the user was on before the
-# most recent focus change. When a new window appears and steals focus, the
-# "previous workspace" is where the user launched the command from.
+# Runs in the background. Two responsibilities:
+# 1. Track the previous workspace for new window placement
+# 2. Move existing watched windows that get activated from another workspace
+#    (e.g. `open file.html` activates a browser on a different workspace)
 
 track_focus() {
     local prev_ws=""
@@ -67,15 +55,30 @@ track_focus() {
         local focused_wid
         focused_wid=$(normalize_wid "$raw_wid")
 
-        local ws
-        ws=$(wmctrl -lp | awk -v w="$focused_wid" '$1 == w {print $2; exit}')
-        [[ -z "$ws" ]] && continue
+        local win_ws
+        win_ws=$(wmctrl -lp | awk -v w="$focused_wid" '$1 == w {print $2; exit}')
+        [[ -z "$win_ws" ]] && continue
 
         prev_ws="$curr_ws"
-        curr_ws="$ws"
+        curr_ws="$win_ws"
 
         [[ -n "$prev_ws" ]] && echo "$prev_ws" > "$STATE_FILE"
         debug "focus changed: prev_ws=$prev_ws curr_ws=$curr_ws"
+
+        # If a watched window got focus and it's on a different workspace than
+        # the current desktop, a command activated it externally — move it here.
+        # (If the user clicked it, they're already on its workspace.)
+        local active_desktop
+        active_desktop=$(wmctrl -d | awk '/\*/ {print $1}')
+
+        if [[ "$win_ws" != "$active_desktop" ]]; then
+            local wclass
+            wclass=$(get_window_class "$focused_wid")
+            if is_watched "$wclass"; then
+                log "$focused_wid ($wclass) activated on WS $win_ws, moving to WS $active_desktop"
+                wmctrl -ir "$focused_wid" -t "$active_desktop"
+            fi
+        fi
     done
 }
 
@@ -116,37 +119,59 @@ handle_new_window() {
 
 # --- Main ---------------------------------------------------------------------
 
-cleanup() {
-    [[ -n "$TRACKER_PID" ]] && kill "$TRACKER_PID" 2>/dev/null
-    rm -rf "$STATE_DIR"
+main() {
+    # Auto-detect DISPLAY if not set (e.g. when running under systemd)
+    if [[ -z "$DISPLAY" ]]; then
+        DISPLAY=$(w -h "$USER" 2>/dev/null | awk '/:[0-9]/ {print $3; exit}')
+        export DISPLAY
+    fi
+
+    if [[ -z "$DISPLAY" ]]; then
+        echo "[window-watcher] error: could not detect DISPLAY — is an X11 session running?"
+        exit 1
+    fi
+
+    STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/window-watcher"
+    STATE_FILE="$STATE_DIR/focus-state"
+    mkdir -p "$STATE_DIR"
+
+    cleanup() {
+        [[ -n "$TRACKER_PID" ]] && kill "$TRACKER_PID" 2>/dev/null
+        rm -rf "$STATE_DIR"
+    }
+    trap cleanup EXIT INT TERM
+
+    log "started (PID $$, DISPLAY=$DISPLAY)"
+
+    # Start focus tracker
+    track_focus &
+    TRACKER_PID=$!
+
+    # Snapshot current windows so we don't process existing ones
+    local KNOWN_WIDS=""
+    for raw_wid in $(xprop -root _NET_CLIENT_LIST 2>/dev/null | grep -oP '0x[0-9a-f]+'); do
+        KNOWN_WIDS+="$(normalize_wid "$raw_wid") "
+    done
+
+    # React to window list changes
+    xprop -root -spy _NET_CLIENT_LIST 2>/dev/null | while read -r line; do
+        local current_wids=""
+        for raw_wid in $(echo "$line" | grep -oP '0x[0-9a-f]+'); do
+            current_wids+="$(normalize_wid "$raw_wid") "
+        done
+
+        for wid in $current_wids; do
+            if [[ "$KNOWN_WIDS" != *"$wid"* ]]; then
+                debug "detected new window: $wid"
+                handle_new_window "$wid"
+            fi
+        done
+
+        KNOWN_WIDS="$current_wids"
+    done
 }
-trap cleanup EXIT INT TERM
 
-log "started (PID $$, DISPLAY=$DISPLAY)"
-
-# Start focus tracker
-track_focus &
-TRACKER_PID=$!
-
-# Snapshot current windows so we don't process existing ones
-KNOWN_WIDS=""
-for raw_wid in $(xprop -root _NET_CLIENT_LIST 2>/dev/null | grep -oP '0x[0-9a-f]+'); do
-    KNOWN_WIDS+="$(normalize_wid "$raw_wid") "
-done
-
-# React to window list changes
-xprop -root -spy _NET_CLIENT_LIST 2>/dev/null | while read -r line; do
-    current_wids=""
-    for raw_wid in $(echo "$line" | grep -oP '0x[0-9a-f]+'); do
-        current_wids+="$(normalize_wid "$raw_wid") "
-    done
-
-    for wid in $current_wids; do
-        if [[ "$KNOWN_WIDS" != *"$wid"* ]]; then
-            debug "detected new window: $wid"
-            handle_new_window "$wid"
-        fi
-    done
-
-    KNOWN_WIDS="$current_wids"
-done
+# Only run main when executed directly (not when sourced for tests)
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
