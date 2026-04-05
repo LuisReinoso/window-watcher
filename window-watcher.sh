@@ -37,6 +37,13 @@ is_watched() {
     return 1
 }
 
+# A workspace id is valid if it's a non-negative integer. -1 means "sticky"
+# (on all workspaces) and must never be used as a move target, otherwise
+# window-watcher would make every watched window sticky.
+is_valid_ws() {
+    [[ "$1" =~ ^[0-9]+$ ]]
+}
+
 # --- Focus tracker ------------------------------------------------------------
 # Runs in the background. Two responsibilities:
 # 1. Track the previous workspace for new window placement
@@ -57,12 +64,15 @@ track_focus() {
 
         local win_ws
         win_ws=$(wmctrl -lp | awk -v w="$focused_wid" '$1 == w {print $2; exit}')
-        [[ -z "$win_ws" ]] && continue
+
+        # Ignore sticky windows (WS -1) — they would poison the state file
+        # and make every subsequent watched window sticky.
+        is_valid_ws "$win_ws" || continue
 
         prev_ws="$curr_ws"
         curr_ws="$win_ws"
 
-        [[ -n "$prev_ws" ]] && echo "$prev_ws" > "$STATE_FILE"
+        [[ -n "$prev_ws" ]] && is_valid_ws "$prev_ws" && echo "$prev_ws" > "$STATE_FILE"
         debug "focus changed: prev_ws=$prev_ws curr_ws=$curr_ws"
 
         # If a watched window got focus and it's on a different workspace than
@@ -70,6 +80,7 @@ track_focus() {
         # (If the user clicked it, they're already on its workspace.)
         local active_desktop
         active_desktop=$(wmctrl -d | awk '/\*/ {print $1}')
+        is_valid_ws "$active_desktop" || continue
 
         if [[ "$win_ws" != "$active_desktop" ]]; then
             local wclass
@@ -104,9 +115,15 @@ handle_new_window() {
     current_ws=$(wmctrl -lp | awk -v w="$wid" '$1 == w {print $2; exit}')
     target_ws=$(cat "$STATE_FILE" 2>/dev/null)
 
-    if [[ -z "$target_ws" ]]; then
+    if ! is_valid_ws "$target_ws"; then
         target_ws=$(wmctrl -d | awk '/\*/ {print $1}')
-        debug "$wid no focus state, fallback to active ws=$target_ws"
+        debug "$wid no valid focus state, fallback to active ws=$target_ws"
+    fi
+
+    # Never move windows to a sticky/invalid workspace
+    if ! is_valid_ws "$target_ws"; then
+        debug "$wid no valid target workspace, skipping move"
+        return
     fi
 
     debug "$wid current_ws=$current_ws target_ws=$target_ws"
