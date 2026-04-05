@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# ww-open — workspace-aware xdg-open wrapper
+# Opens URLs/files in a browser window on the current workspace.
+# If no browser window exists here, opens a new one.
+
+if [[ -z "$1" ]]; then
+    echo "Usage: ww-open <file-or-url>" >&2
+    exit 1
+fi
+
+current_ws=$(wmctrl -d | awk '/\*/ {print $1}')
+
+# Check if any browser window exists on the current workspace
+browser_wid=$(wmctrl -lx | awk -v ws="$current_ws" '
+    $2 == ws && tolower($3) ~ /firefox|chrome|chromium/ {print $1; exit}
+')
+
+if [[ -n "$browser_wid" ]]; then
+    # Browser on this workspace — open as tab (default behavior)
+    xdg-open "$1" 2>/dev/null &
+else
+    # No browser here — detect default browser and open a new window
+    default_browser=$(xdg-settings get default-web-browser 2>/dev/null | sed 's/\.desktop$//')
+
+    case "$default_browser" in
+        *firefox*)    firefox --new-window "$1" &>/dev/null & ;;
+        *chromium*)   chromium --new-window "$1" &>/dev/null & ;;
+        *chrome*|*google-chrome*)
+                      google-chrome --new-window "$1" &>/dev/null & ;;
+        *)            xdg-open "$1" 2>/dev/null & ;;
+    esac
+fi

@@ -40,7 +40,11 @@ mkdir -p "$HOME/.local/bin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "$SCRIPT_DIR/window-watcher.sh" "$HOME/.local/bin/window-watcher.sh"
 chmod +x "$HOME/.local/bin/window-watcher.sh"
-ok "script installed at ~/.local/bin/window-watcher.sh"
+ok "window-watcher.sh installed at ~/.local/bin/"
+
+cp "$SCRIPT_DIR/ww-open" "$HOME/.local/bin/ww-open"
+chmod +x "$HOME/.local/bin/ww-open"
+ok "ww-open installed at ~/.local/bin/"
 
 # 4. Install systemd service
 info "Installing systemd service..."
