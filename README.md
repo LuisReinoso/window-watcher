@@ -67,11 +67,21 @@ bash uninstall.sh
 
 ## Configuration
 
-Edit `WATCH_CLASSES` in `~/.local/bin/window-watcher.sh` to declare which windows should be managed. Add `WM_CLASS` substrings to the array:
+Copy the example config and edit it:
+
+```bash
+cp config.example.sh config.sh
+```
+
+Edit `config.sh` to declare which windows should be managed. Add `WM_CLASS` substrings to the array:
 
 ```bash
 WATCH_CLASSES=("your-app-class" "another-class")
 ```
+
+The `config.sh` file is git-ignored so your local setup stays private. Re-run `bash install.sh` after editing.
+
+You can also override the config path with the `WINDOW_WATCHER_CONFIG` environment variable.
 
 To find the `WM_CLASS` of any window:
 

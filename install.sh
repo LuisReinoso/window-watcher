@@ -46,7 +46,25 @@ cp "$SCRIPT_DIR/ww-open" "$HOME/.local/bin/ww-open"
 chmod +x "$HOME/.local/bin/ww-open"
 ok "ww-open installed at ~/.local/bin/"
 
-# 4. Install systemd service
+if [[ -f "$SCRIPT_DIR/config.sh" ]]; then
+    cp "$SCRIPT_DIR/config.sh" "$HOME/.local/bin/config.sh"
+    ok "config.sh installed at ~/.local/bin/"
+elif [[ ! -f "$HOME/.local/bin/config.sh" ]]; then
+    echo ""
+    info "No config.sh found. Copy config.example.sh to config.sh and edit it:"
+    echo "  cp config.example.sh config.sh"
+    echo ""
+fi
+
+# 4. Set ww-open as default URL handler
+info "Setting ww-open as default URL handler..."
+mkdir -p "$HOME/.local/share/applications"
+cp "$SCRIPT_DIR/ww-open.desktop" "$HOME/.local/share/applications/ww-open.desktop"
+xdg-settings set default-web-browser ww-open.desktop 2>/dev/null && \
+    ok "ww-open set as default URL handler" || \
+    info "could not set default — run: xdg-settings set default-web-browser ww-open.desktop"
+
+# 5. Install systemd service
 info "Installing systemd service..."
 mkdir -p "$HOME/.config/systemd/user"
 cp "$SCRIPT_DIR/window-watcher.service" "$HOME/.config/systemd/user/window-watcher.service"

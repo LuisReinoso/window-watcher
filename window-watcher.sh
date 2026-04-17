@@ -6,10 +6,16 @@ set -o pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-# Applications whose windows should be moved to the launch workspace.
-# Add WM_CLASS substrings to match. Find them with: xprop | grep WM_CLASS
-# Example: WATCH_CLASSES=("your-app-class" "another-class")
+# Load user config from config.sh (next to the script, or from the project dir).
+# The config file sets WATCH_CLASSES and any other overrides.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="${WINDOW_WATCHER_CONFIG:-$SCRIPT_DIR/config.sh}"
+
 WATCH_CLASSES=()
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+fi
 
 # Set DEBUG=1 to enable verbose logging
 DEBUG="${DEBUG:-0}"
@@ -45,10 +51,10 @@ is_valid_ws() {
 }
 
 # --- Focus tracker ------------------------------------------------------------
-# Runs in the background. Two responsibilities:
-# 1. Track the previous workspace for new window placement
-# 2. Move existing watched windows that get activated from another workspace
-#    (e.g. `open file.html` activates a browser on a different workspace)
+# Runs in the background. Tracks which workspace the user was on before
+# the most recent focus change, so handle_new_window knows where to place
+# new windows. External activation (e.g. clicking a URL) is handled by
+# ww-open, which brings the window back after the browser opens it.
 
 track_focus() {
     local prev_ws=""
@@ -74,22 +80,6 @@ track_focus() {
 
         [[ -n "$prev_ws" ]] && is_valid_ws "$prev_ws" && echo "$prev_ws" > "$STATE_FILE"
         debug "focus changed: prev_ws=$prev_ws curr_ws=$curr_ws"
-
-        # If a watched window got focus and it's on a different workspace than
-        # the current desktop, a command activated it externally — move it here.
-        # (If the user clicked it, they're already on its workspace.)
-        local active_desktop
-        active_desktop=$(wmctrl -d | awk '/\*/ {print $1}')
-        is_valid_ws "$active_desktop" || continue
-
-        if [[ "$win_ws" != "$active_desktop" ]]; then
-            local wclass
-            wclass=$(get_window_class "$focused_wid")
-            if is_watched "$wclass"; then
-                log "$focused_wid ($wclass) activated on WS $win_ws, moving to WS $active_desktop"
-                wmctrl -ir "$focused_wid" -t "$active_desktop"
-            fi
-        fi
     done
 }
 
