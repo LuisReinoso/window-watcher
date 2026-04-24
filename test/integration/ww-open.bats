@@ -53,6 +53,10 @@ EOF
     # Config with BROWSER_CMD set
     export WINDOW_WATCHER_CONFIG="$BATS_TEST_TMPDIR/config.sh"
     echo 'BROWSER_CMD="firefox"' > "$WINDOW_WATCHER_CONFIG"
+
+    # Isolate dedup cache per test
+    export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/runtime"
+    mkdir -p "$XDG_RUNTIME_DIR"
 }
 
 teardown() {
@@ -116,4 +120,26 @@ EOF
     sleep 0.1
     run cat "$STUB_LOG"
     assert_output --partial "firefox http://localhost:3000/dashboard"
+}
+
+@test "ww-open dedups rapid duplicate invocations for the same URL" {
+    run_ww_open "https://example.com"
+    assert_success
+    run_ww_open "https://example.com"
+    assert_success
+    sleep 0.1
+    # Only one browser invocation should be recorded
+    run bash -c "grep -c 'firefox https://example.com' '$STUB_LOG'"
+    assert_output "1"
+}
+
+@test "ww-open does not dedup different URLs" {
+    run_ww_open "https://example.com"
+    assert_success
+    run_ww_open "https://other.com"
+    assert_success
+    sleep 0.1
+    run cat "$STUB_LOG"
+    assert_output --partial "firefox https://example.com"
+    assert_output --partial "firefox https://other.com"
 }

@@ -9,6 +9,20 @@ if [[ -z "$1" ]]; then
     exit 1
 fi
 
+# Dedup rapid duplicate invocations for the same URL.
+# Some terminals (VTE + OSC-8 hyperlinks) fire the handler twice on Ctrl+click,
+# once for the regex-autodetected URL and once for the explicit hyperlink.
+DEDUP_DIR="${XDG_RUNTIME_DIR:-/tmp}/ww-open"
+mkdir -p "$DEDUP_DIR"
+dedup_key=$(printf '%s' "$1" | sha1sum | cut -c1-16)
+dedup_file="$DEDUP_DIR/$dedup_key"
+now=$(date +%s%3N)
+if [[ -f "$dedup_file" ]]; then
+    last=$(<"$dedup_file")
+    (( now - last < 1500 )) && exit 0
+fi
+echo "$now" > "$dedup_file"
+
 # Load config (same lookup logic as window-watcher.sh)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${WINDOW_WATCHER_CONFIG:-$SCRIPT_DIR/config.sh}"
